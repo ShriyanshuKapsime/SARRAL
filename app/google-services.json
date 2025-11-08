@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "244872515395",
+    "project_id": "sarral-db308",
+    "storage_bucket": "sarral-db308.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:244872515395:android:d7742e67b7d68cffbba9f6",
+        "android_client_info": {
+          "package_name": "com.runanywhere.startup_hackathon20"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCxceRWeIm38Y8L5-B6PwmkaTi25aCR5IA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
