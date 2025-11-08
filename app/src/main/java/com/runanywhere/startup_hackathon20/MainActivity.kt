@@ -14,6 +14,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import com.google.firebase.auth.FirebaseAuth
 import com.runanywhere.startup_hackathon20.ui.theme.Startup_hackathon20Theme
 
 class MainActivity : ComponentActivity() {
@@ -22,8 +26,110 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             Startup_hackathon20Theme {
-                ChatScreen()
+                AppNavigation()
             }
+        }
+    }
+}
+
+@Composable
+fun AppNavigation() {
+    val navController = rememberNavController()
+    val auth = FirebaseAuth.getInstance()
+    val currentUser = auth.currentUser
+
+    // Determine start destination based on authentication state
+    val startDestination = if (currentUser != null) "userDashboard" else "login"
+
+    NavHost(
+        navController = navController,
+        startDestination = startDestination
+    ) {
+        composable("login") {
+            LoginScreen(
+                onNavigateToSignup = {
+                    navController.navigate("signup")
+                },
+                onLoginSuccess = {
+                    navController.navigate("userDashboard") {
+                        popUpTo("login") { inclusive = true }
+                    }
+                }
+            )
+        }
+
+        composable("signup") {
+            SignupScreen(
+                onNavigateToLogin = {
+                    navController.navigate("login") {
+                        popUpTo("signup") { inclusive = true }
+                    }
+                },
+                onSignupSuccess = {
+                    navController.navigate("login") {
+                        popUpTo("signup") { inclusive = true }
+                    }
+                }
+            )
+        }
+
+        composable("userDashboard") {
+            UserDashboardScreen(
+                onNavigateToBorrow = {
+                    navController.navigate("borrowFlow")
+                },
+                onNavigateToLend = {
+                    navController.navigate("lendFlow")
+                },
+                onLogout = {
+                    navController.navigate("login") {
+                        popUpTo(0) { inclusive = true }
+                    }
+                }
+            )
+        }
+
+        composable("borrowFlow") {
+            BorrowFlowStartScreen(
+                onNavigateBack = {
+                    navController.popBackStack()
+                },
+                onNavigateToUPIInput = {
+                    navController.navigate("upiInput")
+                }
+            )
+        }
+
+        composable("lendFlow") {
+            LendFlowStartScreen(
+                onNavigateBack = {
+                    navController.popBackStack()
+                }
+            )
+        }
+
+        composable("upiInput") {
+            UPIInputScreen(
+                onNavigateBack = {
+                    navController.popBackStack()
+                },
+                onSubmitUPI = { upiId ->
+                    // Navigate to Borrower Loan Dashboard after UPI verification
+                    navController.navigate("borrowerDashboard")
+                }
+            )
+        }
+
+        composable("borrowerDashboard") {
+            BorrowerLoanDashboardScreen(
+                onNavigateBack = {
+                    navController.popBackStack()
+                },
+                onRequestLoan = { offer ->
+                    // TODO: Handle loan request
+                    // For now, just show a simple response or navigate to loan request screen
+                }
+            )
         }
     }
 }
