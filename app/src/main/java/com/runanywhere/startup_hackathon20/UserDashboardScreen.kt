@@ -1,5 +1,6 @@
 package com.runanywhere.startup_hackathon20
 
+import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -9,11 +10,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -24,6 +27,9 @@ fun UserDashboardScreen(
     onNavigateToProfile: () -> Unit = {}
 ) {
     val auth = FirebaseAuth.getInstance()
+    val firestore = FirebaseFirestore.getInstance()
+    val context = LocalContext.current
+    var isUpdatingRole by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -85,44 +91,108 @@ fun UserDashboardScreen(
             
             // Borrow Money Button
             Button(
-                onClick = onNavigateToBorrow,
+                onClick = {
+                    val currentUser = auth.currentUser
+                    if (currentUser == null) {
+                        Toast.makeText(context, "User not authenticated", Toast.LENGTH_SHORT).show()
+                        return@Button
+                    }
+
+                    isUpdatingRole = true
+                    // Update role to borrower
+                    firestore.collection("user_profiles")
+                        .document(currentUser.uid)
+                        .update("role", "borrower")
+                        .addOnSuccessListener {
+                            isUpdatingRole = false
+                            onNavigateToBorrow()
+                        }
+                        .addOnFailureListener { e ->
+                            isUpdatingRole = false
+                            Toast.makeText(
+                                context,
+                                "Failed to update role: ${e.message}",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(80.dp),
                 shape = RoundedCornerShape(24.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary
-                )
+                ),
+                enabled = !isUpdatingRole
             ) {
-                Text(
-                    text = "Borrow Money",
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 22.sp
+                if (isUpdatingRole) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        color = MaterialTheme.colorScheme.onPrimary
                     )
-                )
+                } else {
+                    Text(
+                        text = "Borrow Money",
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 22.sp
+                        )
+                    )
+                }
             }
             
             Spacer(modifier = Modifier.height(24.dp))
             
             // Lend Money Button
             Button(
-                onClick = onNavigateToLend,
+                onClick = {
+                    val currentUser = auth.currentUser
+                    if (currentUser == null) {
+                        Toast.makeText(context, "User not authenticated", Toast.LENGTH_SHORT).show()
+                        return@Button
+                    }
+
+                    isUpdatingRole = true
+                    // Update role to lender
+                    firestore.collection("user_profiles")
+                        .document(currentUser.uid)
+                        .update("role", "lender")
+                        .addOnSuccessListener {
+                            isUpdatingRole = false
+                            onNavigateToLend()
+                        }
+                        .addOnFailureListener { e ->
+                            isUpdatingRole = false
+                            Toast.makeText(
+                                context,
+                                "Failed to update role: ${e.message}",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(80.dp),
                 shape = RoundedCornerShape(24.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.secondary
-                )
+                ),
+                enabled = !isUpdatingRole
             ) {
-                Text(
-                    text = "Lend Money",
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 22.sp
+                if (isUpdatingRole) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        color = MaterialTheme.colorScheme.onSecondary
                     )
-                )
+                } else {
+                    Text(
+                        text = "Lend Money",
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 22.sp
+                        )
+                    )
+                }
             }
         }
     }

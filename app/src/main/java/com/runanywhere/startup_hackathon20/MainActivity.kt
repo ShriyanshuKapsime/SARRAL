@@ -96,7 +96,7 @@ fun AppNavigation() {
                     navController.navigate("borrowFlow")
                 },
                 onNavigateToLend = {
-                    navController.navigate("lendFlow")
+                    navController.navigate("lenderDashboard")
                 },
                 onLogout = {
                     navController.navigate("login") {
@@ -337,6 +337,44 @@ fun AppNavigation() {
 
         composable("lenderRequests") {
             LenderLoanRequestsScreen(
+                onNavigateBack = {
+                    navController.popBackStack()
+                }
+            )
+        }
+
+        composable("lenderDashboard") {
+            LenderDashboardScreen(
+                onNavigateToCreateOffer = {
+                    navController.navigate("createLoanOffer")
+                },
+                onNavigateToLoanRequests = {
+                    navController.navigate("lenderRequests")
+                },
+                onNavigateToActiveLoans = {
+                    navController.navigate("lenderActiveLoans")
+                },
+                onNavigateToProfile = {
+                    navController.navigate("userProfile")
+                },
+                onLogout = {
+                    navController.navigate("login") {
+                        popUpTo(0) { inclusive = true }
+                    }
+                }
+            )
+        }
+
+        composable("createLoanOffer") {
+            CreateLoanOfferScreen(
+                onNavigateBack = {
+                    navController.popBackStack()
+                }
+            )
+        }
+
+        composable("lenderActiveLoans") {
+            LenderListedLoansScreen(
                 onNavigateBack = {
                     navController.popBackStack()
                 }

@@ -168,11 +168,7 @@ fun ReviewOfferScreen(
                             color = MaterialTheme.colorScheme.onPrimaryContainer
                         )
 
-                        HorizontalDivider(
-                            modifier = Modifier.padding(horizontal = 4.dp),
-                            thickness = 2.5.dp,
-                            color = androidx.compose.ui.graphics.Color(0xCC33B6FF) // #33B6FF with 80% opacity
-                        )
+                        HorizontalDivider()
 
                         DetailRow(label = "Lender", value = lenderName)
                         DetailRow(label = "Loan Amount", value = "₹${String.format("%,d", amount)}")
@@ -204,11 +200,7 @@ fun ReviewOfferScreen(
                             color = MaterialTheme.colorScheme.onSecondaryContainer
                         )
 
-                        HorizontalDivider(
-                            modifier = Modifier.padding(horizontal = 4.dp),
-                            thickness = 2.5.dp,
-                            color = androidx.compose.ui.graphics.Color(0xCC33B6FF) // #33B6FF with 80% opacity
-                        )
+                        HorizontalDivider()
 
                         DetailRow(
                             label = "Total Interest",

@@ -3,21 +3,28 @@ package com.runanywhere.startup_hackathon20
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import java.util.*
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 // Data class for loan offer
@@ -27,13 +34,29 @@ data class LoanOffer(
     val lenderName: String = "",
     val loanAmount: Int = 0,
     val interestRate: Double = 0.0,
-    val tenureMonths: Int = 0
+    val tenureMonths: Int = 0,
+    val minScoreRequired: Int = 0,
+    val interestRateTotal: Double? = null,  // New: for interest_rate_total field
+    val perAnnumRate: Double? = null        // New: for per_annum_rate field
 )
 
 // Data class for UPI transaction
 data class UPITransaction(
     val amount: Double,
     val timestamp: Date
+)
+
+// Data class for AI recommendation
+data class AIRecommendation(
+    val offer: LoanOffer,
+    val totalRepayable: Double
+)
+
+// Data class for AI recommendation sorting
+data class OfferWithScore(
+    val offer: LoanOffer,
+    val differenceFromDesired: Int,
+    val totalInterestPayable: Double
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -49,11 +72,80 @@ fun BorrowerLoanDashboardScreen(
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var loanOffers by remember { mutableStateOf<List<LoanOffer>>(emptyList()) }
     var isLoadingOffers by remember { mutableStateOf(true) }
+    var smartRecommendation by remember { mutableStateOf<LoanOffer?>(null) }
+    var aiExplanation by remember { mutableStateOf<String?>(null) }
+    var isGeneratingAI by remember { mutableStateOf(false) }
+    var showBottomSheet by remember { mutableStateOf(false) }
+    var minAmountInput by remember { mutableStateOf("") }
+    var maxAmountInput by remember { mutableStateOf("") }
+    var aiRecommendation by remember { mutableStateOf<AIRecommendation?>(null) }
+    var recommendationMessage by remember { mutableStateOf<String?>(null) }
+    var isSearchingRecommendation by remember { mutableStateOf(false) }
+
+    // Info dialog states for SARRAL Score and Loan Limit
+    var showSarralScoreInfoDialog by remember { mutableStateOf(false) }
+    var showLoanLimitInfoDialog by remember { mutableStateOf(false) }
+
+    // New AI recommendation states
+    var showLoanAmountDialog by remember { mutableStateOf(false) }
+    var desiredLoanAmount by remember { mutableStateOf("") }
+    var recommendedOffer by remember { mutableStateOf<LoanOffer?>(null) }
+    var noRecommendationMessage by remember { mutableStateOf<String?>(null) }
 
     val auth = FirebaseAuth.getInstance()
     val firestore = FirebaseFirestore.getInstance()
+    val context = LocalContext.current
+    val sheetState = rememberModalBottomSheetState()
 
-    // Function to process offers without UIDs
+    // Function to generate AI recommendation based on desired amount
+    fun generateAIRecommendation(desiredAmount: Int) {
+        val currentUser = auth.currentUser ?: return
+
+        // Step 3: Filter eligible offers
+        val eligibleOffers = loanOffers.filter { offer ->
+            offer.lenderUid != currentUser.uid &&       // Exclude self-borrowing
+                    offer.loanAmount <= loanLimit &&            // Within loan limit
+                    offer.minScoreRequired <= sarralScore       // Meets score requirement
+        }
+
+        if (eligibleOffers.isEmpty()) {
+            recommendedOffer = null
+            noRecommendationMessage = "No suitable offers match your loan limit and profile."
+            return
+        }
+
+        // Step 4: Calculate metrics for each offer
+        val offersWithScores = eligibleOffers.map { offer ->
+            // Calculate difference from desired amount
+            val differenceFromDesired = abs(offer.loanAmount - desiredAmount)
+
+            // Calculate total interest payable
+            val totalInterestPayable = if (offer.interestRateTotal != null) {
+                // If interest_rate_total is provided
+                (offer.loanAmount * (offer.interestRateTotal / 100.0))
+            } else if (offer.perAnnumRate != null) {
+                // If only per_annum_rate + tenure_months exist
+                (offer.loanAmount * (offer.perAnnumRate / 100.0)) * (offer.tenureMonths / 12.0)
+            } else {
+                // Fallback to interestRate (existing field)
+                (offer.loanAmount * (offer.interestRate / 100.0))
+            }
+
+            OfferWithScore(offer, differenceFromDesired, totalInterestPayable)
+        }
+
+        // Step 5: Sort offers
+        val sortedOffers = offersWithScores.sortedWith(
+            compareBy<OfferWithScore> { it.differenceFromDesired }  // Primary: closest to desired
+                .thenBy { it.totalInterestPayable }                 // Secondary: cheapest loan
+        )
+
+        // Step 6: Pick the first offer
+        recommendedOffer = sortedOffers.firstOrNull()?.offer
+        noRecommendationMessage = null
+    }
+
+    // Process offers without UIDs
     fun processOffersWithoutUid(
         offers: List<Pair<String, com.google.firebase.firestore.DocumentSnapshot>>,
         uidMap: Map<String, String>,
@@ -61,14 +153,21 @@ fun BorrowerLoanDashboardScreen(
     ) {
         offers.forEach { (lenderName, doc) ->
             try {
+                val interestRateTotal = doc.getDouble("interest_rate_total")
+                val perAnnumRate = doc.getDouble("per_annum_rate")
+                val effectiveInterestRate = interestRateTotal ?: perAnnumRate ?: 0.0
+
                 resultList.add(
                     LoanOffer(
                         id = doc.id,
                         lenderUid = uidMap[lenderName] ?: "unknown_lender",
                         lenderName = lenderName,
                         loanAmount = doc.getLong("amount")?.toInt() ?: 0,
-                        interestRate = doc.getDouble("interest_rate_total") ?: 0.0,
-                        tenureMonths = doc.getLong("tenure_months")?.toInt() ?: 0
+                        interestRate = effectiveInterestRate,
+                        tenureMonths = doc.getLong("tenure_months")?.toInt() ?: 0,
+                        minScoreRequired = doc.getLong("min_score_required")?.toInt() ?: 0,
+                        interestRateTotal = interestRateTotal,
+                        perAnnumRate = perAnnumRate
                     )
                 )
             } catch (e: Exception) {
@@ -101,20 +200,39 @@ fun BorrowerLoanDashboardScreen(
                 val offersWithoutUid = mutableListOf<Pair<String, com.google.firebase.firestore.DocumentSnapshot>>()
                 
                 offersSnapshot.documents.forEach { doc ->
+                    // Filter: Only include offers that are available or don't have a status field (backward compatibility)
+                    val status = doc.getString("status")
+                    if (status != null && status != "available") {
+                        // Skip offers that are not available (inactive, removed, etc.)
+                        android.util.Log.d(
+                            "OffersFetch",
+                            "Skipping offer ${doc.id} with status: $status"
+                        )
+                        return@forEach
+                    }
+
                     val lenderUid = doc.getString("lender_uid")
                     val lenderName = doc.getString("lender_name") ?: ""
                     
                     if (!lenderUid.isNullOrBlank()) {
                         // Offer has lender_uid, use it directly
                         try {
+                            val interestRateTotal = doc.getDouble("interest_rate_total")
+                            val perAnnumRate = doc.getDouble("per_annum_rate")
+                            val effectiveInterestRate = interestRateTotal ?: perAnnumRate ?: 0.0
+
                             offersList.add(
                                 LoanOffer(
                                     id = doc.id,
                                     lenderUid = lenderUid,
                                     lenderName = lenderName,
                                     loanAmount = doc.getLong("amount")?.toInt() ?: 0,
-                                    interestRate = doc.getDouble("interest_rate_total") ?: 0.0,
-                                    tenureMonths = doc.getLong("tenure_months")?.toInt() ?: 0
+                                    interestRate = effectiveInterestRate,
+                                    tenureMonths = doc.getLong("tenure_months")?.toInt() ?: 0,
+                                    minScoreRequired = doc.getLong("min_score_required")?.toInt()
+                                        ?: 0,
+                                    interestRateTotal = interestRateTotal,
+                                    perAnnumRate = perAnnumRate
                                 )
                             )
                             android.util.Log.d("OffersFetch", "Offer ${doc.id} has lender_uid: $lenderUid")
@@ -423,15 +541,31 @@ fun BorrowerLoanDashboardScreen(
                                 .padding(24.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            // Title
-                            Text(
-                                text = "Your SARRAL Score",
-                                style = MaterialTheme.typography.titleLarge.copy(
-                                    fontWeight = FontWeight.SemiBold
-                                ),
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-
+                            // Row for SARRAL Score title and info
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = "Your SARRAL Score",
+                                    style = MaterialTheme.typography.titleLarge.copy(
+                                        fontWeight = FontWeight.SemiBold
+                                    ),
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                IconButton(
+                                    onClick = { showSarralScoreInfoDialog = true },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Info,
+                                        contentDescription = "Info about SARRAL Score",
+                                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                            }
                             Spacer(modifier = Modifier.height(16.dp))
 
                             // Large Score
@@ -446,20 +580,236 @@ fun BorrowerLoanDashboardScreen(
 
                             Spacer(modifier = Modifier.height(16.dp))
 
-                            // Loan Limit
-                            Text(
-                                text = "Loan Limit Available: ₹${String.format("%,d", loanLimit)}",
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    fontWeight = FontWeight.Medium
-                                ),
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
+                            // Row for loan limit and info
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = "Loan Limit Available: ₹${
+                                        String.format(
+                                            "%,d",
+                                            loanLimit
+                                        )
+                                    }",
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.Medium
+                                    ),
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                IconButton(
+                                    onClick = { showLoanLimitInfoDialog = true },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Info,
+                                        contentDescription = "Info about Loan Limit",
+                                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                            }
                         }
                     }
                 }
 
                 item {
                     Spacer(modifier = Modifier.height(8.dp))
+                }
+
+                // AI Recommendation Section
+                item {
+                    if (recommendedOffer != null) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.secondaryContainer
+                            ),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(20.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                // Title with emoji
+                                Text(
+                                    text = "AI Recommended Offer 🤖",
+                                    style = MaterialTheme.typography.titleLarge.copy(
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+
+                                HorizontalDivider()
+
+                                // Lender Name
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "Lender:",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                    Text(
+                                        text = recommendedOffer!!.lenderName,
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontWeight = FontWeight.SemiBold
+                                        ),
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                }
+
+                                // Amount
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "Amount:",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                    Text(
+                                        text = "₹${
+                                            String.format(
+                                                "%,d",
+                                                recommendedOffer!!.loanAmount
+                                            )
+                                        }",
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontWeight = FontWeight.Bold
+                                        ),
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+
+                                // Interest Rate
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "Interest:",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                    Text(
+                                        text = "${
+                                            String.format(
+                                                "%.2f",
+                                                recommendedOffer!!.interestRate
+                                            )
+                                        }%",
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontWeight = FontWeight.Bold
+                                        ),
+                                        color = MaterialTheme.colorScheme.secondary
+                                    )
+                                }
+
+                                // Tenure
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Tenure:",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                    Text(
+                                        text = "${recommendedOffer!!.tenureMonths} months",
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontWeight = FontWeight.Medium
+                                        ),
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                }
+
+                                HorizontalDivider()
+
+                                // Apply Now Button
+                                Button(
+                                    onClick = {
+                                        recommendedOffer?.let { offer ->
+                                            // Validate loan limit before proceeding
+                                            if (offer.loanAmount > loanLimit) {
+                                                android.widget.Toast.makeText(
+                                                    context,
+                                                    "Cannot request this loan. Amount (₹${
+                                                        String.format(
+                                                            "%,d",
+                                                            offer.loanAmount
+                                                        )
+                                                    }) exceeds your available loan limit (₹${
+                                                        String.format(
+                                                            "%,d",
+                                                            loanLimit
+                                                        )
+                                                    })",
+                                                    android.widget.Toast.LENGTH_LONG
+                                                ).show()
+                                            } else {
+                                                onRequestLoan(offer)
+                                            }
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary
+                                    )
+                                ) {
+                                    Text(
+                                        text = "Apply Now",
+                                        style = MaterialTheme.typography.titleMedium.copy(
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    } else if (noRecommendationMessage != null) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant
+                            )
+                        ) {
+                            Text(
+                                text = noRecommendationMessage!!,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(20.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Get AI Recommendation Button
+                item {
+                    Button(
+                        onClick = { showLoanAmountDialog = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.tertiary
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            text = "Get AI Recommendation",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold
+                            )
+                        )
+                    }
                 }
 
                 // Loan Marketplace Title
@@ -519,12 +869,225 @@ fun BorrowerLoanDashboardScreen(
                     items(loanOffers) { offer ->
                         LoanOfferCard(
                             offer = offer,
-                            onRequestLoan = { onRequestLoan(offer) }
+                            onRequestLoan = {
+                                if (offer.loanAmount > loanLimit) {
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        "Cannot request this loan. Amount (₹${
+                                            String.format(
+                                                "%,d",
+                                                offer.loanAmount
+                                            )
+                                        }) exceeds your available loan limit (₹${
+                                            String.format(
+                                                "%,d",
+                                                loanLimit
+                                            )
+                                        })",
+                                        android.widget.Toast.LENGTH_LONG
+                                    ).show()
+                                } else {
+                                    onRequestLoan(offer)
+                                }
+                            }
                         )
                     }
                 }
             }
         }
+    }
+
+    // Dialog for entering desired loan amount
+    if (showLoanAmountDialog) {
+        AlertDialog(
+            onDismissRequest = { showLoanAmountDialog = false },
+            title = { Text("Enter Desired Loan Amount") },
+            text = {
+                OutlinedTextField(
+                    value = desiredLoanAmount,
+                    onValueChange = { desiredLoanAmount = it },
+                    label = { Text("Desired Amount (₹)") },
+                    placeholder = { Text("e.g., 5000") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val amount = desiredLoanAmount.toIntOrNull()
+                        if (amount != null && amount > 0) {
+                            generateAIRecommendation(amount)
+                            showLoanAmountDialog = false
+                        } else {
+                            android.widget.Toast.makeText(
+                                context,
+                                "Please enter a valid amount",
+                                android.widget.Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
+                ) {
+                    Text("Get Recommendation")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLoanAmountDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Dialog for SARRAL Score info
+    if (showSarralScoreInfoDialog) {
+        AlertDialog(
+            onDismissRequest = { showSarralScoreInfoDialog = false },
+            title = { 
+                Text(
+                    "What is SARRAL Score?",
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontWeight = FontWeight.Bold
+                    )
+                ) 
+            },
+            text = {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        "Your SARRAL Score measures your financial consistency based on your UPI transaction activity.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    
+                    Spacer(modifier = Modifier.height(4.dp))
+                    
+                    Text(
+                        "It is calculated using three main factors:",
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    )
+                    Text("• Transaction frequency (how often you receive payments)")
+                    Text("• Income stability (consistency over 30 days)")
+                    Text("• Average transaction amount")
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    Text(
+                        "The score ranges from 0–100:",
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    )
+                    Text("- Below 40: Not eligible")
+                    Text("- 40–65: Small limit, high risk")
+                    Text("- 65–85: Normal eligibility")
+                    Text("- 85+: Excellent repayment trust")
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    Text(
+                        "Improve your score by increasing consistent UPI inflows and maintaining regular daily transactions.",
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
+                        )
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showSarralScoreInfoDialog = false },
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Got it")
+                }
+            },
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
+
+    // Dialog for Loan Limit info
+    if (showLoanLimitInfoDialog) {
+        AlertDialog(
+            onDismissRequest = { showLoanLimitInfoDialog = false },
+            title = { 
+                Text(
+                    "How is Loan Limit Calculated?",
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontWeight = FontWeight.Bold
+                    )
+                ) 
+            },
+            text = {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        "Your Loan Limit represents the maximum amount you can borrow right now.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    
+                    Spacer(modifier = Modifier.height(4.dp))
+                    
+                    Text(
+                        "It is derived from your average UPI income over the last month:",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            "Loan Limit = 30% × Average Monthly UPI Inflow",
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = FontWeight.Bold
+                            ),
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    Text(
+                        "For example:",
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    )
+                    Text(
+                        "If your monthly inflow is ₹20,000, your current loan limit will be ₹6,000.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    Text(
+                        "Repaying loans on time increases your Goodwill Score and can raise this limit up to 50% over time.",
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
+                        )
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showLoanLimitInfoDialog = false },
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Got it")
+                }
+            },
+            shape = RoundedCornerShape(16.dp)
+        )
     }
 }
 
@@ -594,7 +1157,7 @@ fun LoanOfferCard(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "${offer.interestRate}%",
+                        text = "${String.format("%.2f", offer.interestRate)}%",
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontWeight = FontWeight.SemiBold
                         ),

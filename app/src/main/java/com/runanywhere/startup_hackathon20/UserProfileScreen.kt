@@ -75,7 +75,7 @@ fun UserProfileScreen(
                         sarralScore = doc.getLong("sarral_score")?.toInt() ?: 0,
                         goodwillScore = doc.getLong("goodwill_score")?.toInt() ?: 0,
                         loanLimit = doc.getLong("loan_limit")?.toInt() ?: 0,
-                        activeLoan = doc.getBoolean("active_loan") ?: false
+                        activeLoan = doc.getBoolean("active_loan") ?: false,
                     )
 
                     val currentRole = doc.getString("role") ?: "borrower"
@@ -491,75 +491,27 @@ fun UserProfileScreen(
                                     showActiveLoanDialog = true
                                     isSwitchingRole = false
                                 } else {
-                                    // Check for active loans where user is borrower or lender
-                                    firestore.collection("active_loans")
-                                        .whereEqualTo("borrower_uid", currentUser.uid)
-                                        .whereEqualTo("status", "ongoing")
-                                        .get()
-                                        .addOnSuccessListener { borrowerLoans ->
-                                            if (borrowerLoans.isEmpty) {
-                                                firestore.collection("active_loans")
-                                                    .whereEqualTo("lender_uid", currentUser.uid)
-                                                    .whereEqualTo("status", "ongoing")
-                                                    .get()
-                                                    .addOnSuccessListener { lenderLoans ->
-                                                        if (lenderLoans.isEmpty) {
-                                                            // No active loans, proceed with role switch
-                                                            val newRole =
-                                                                if (userProfile?.role == "borrower") "lender" else "borrower"
+                                    // No active loans, proceed with role switch
+                                    val newRole =
+                                        if (userProfile?.role == "borrower") "lender" else "borrower"
 
-                                                            firestore.collection("user_profiles")
-                                                                .document(currentUser.uid)
-                                                                .update("role", newRole)
-                                                                .addOnSuccessListener {
-                                                                    userProfile =
-                                                                        userProfile?.copy(role = newRole)
-                                                                    isSwitchingRole = false
-                                                                    Toast.makeText(
-                                                                        context,
-                                                                        "Role switched to $newRole",
-                                                                        Toast.LENGTH_SHORT
-                                                                    ).show()
-                                                                }
-                                                                .addOnFailureListener {
-                                                                    isSwitchingRole = false
-                                                                    Toast.makeText(
-                                                                        context,
-                                                                        "Failed to switch role",
-                                                                        Toast.LENGTH_SHORT
-                                                                    ).show()
-                                                                }
-                                                        } else {
-                                                            isSwitchingRole = false
-                                                            Toast.makeText(
-                                                                context,
-                                                                "Cannot switch roles while a loan is active",
-                                                                Toast.LENGTH_LONG
-                                                            ).show()
-                                                        }
-                                                    }
-                                                    .addOnFailureListener {
-                                                        isSwitchingRole = false
-                                                        Toast.makeText(
-                                                            context,
-                                                            "Error checking lender loans",
-                                                            Toast.LENGTH_SHORT
-                                                        ).show()
-                                                    }
-                                            } else {
-                                                isSwitchingRole = false
-                                                Toast.makeText(
-                                                    context,
-                                                    "Cannot switch roles while a loan is active",
-                                                    Toast.LENGTH_LONG
-                                                ).show()
-                                            }
+                                    firestore.collection("user_profiles")
+                                        .document(currentUser.uid)
+                                        .update("role", newRole)
+                                        .addOnSuccessListener {
+                                            userProfile = userProfile?.copy(role = newRole)
+                                            isSwitchingRole = false
+                                            Toast.makeText(
+                                                context,
+                                                "Role switched successfully.",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
                                         }
                                         .addOnFailureListener {
                                             isSwitchingRole = false
                                             Toast.makeText(
                                                 context,
-                                                "Error checking borrower loans",
+                                                "Failed to switch role",
                                                 Toast.LENGTH_SHORT
                                             ).show()
                                         }

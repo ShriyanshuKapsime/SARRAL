@@ -23,7 +23,8 @@ data class LenderLoanRequest(
     val borrowerUid: String = "",
     val borrowerName: String = "",
     val amount: Int = 0,
-    val interest: Double = 0.0,
+    val interestRateTotal: Double = 0.0,
+    val tenureMonths: Int = 0,
     val tenureDays: Int = 0,
     val status: String = "pending",
     val timestamp: Timestamp? = null
@@ -56,11 +57,15 @@ fun LenderLoanRequestsScreen(
         isLoading = true
         firestore.collection("loan_requests")
             .whereEqualTo("lender_uid", currentUser.uid)
-            .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
             .get()
             .addOnSuccessListener { documents ->
+                // Sort manually by timestamp in descending order after fetching
+                val sortedDocuments = documents.documents.sortedByDescending { doc ->
+                    doc.getTimestamp("timestamp")?.toDate()?.time ?: 0L
+                }
+
                 val requestsList = mutableListOf<LenderLoanRequest>()
-                val borrowerUids = documents.mapNotNull { doc ->
+                val borrowerUids = sortedDocuments.mapNotNull { doc ->
                     doc.getString("borrower_uid")
                 }.distinct()
 
@@ -87,9 +92,23 @@ fun LenderLoanRequestsScreen(
                             if (fetchedCount == borrowerUids.size) {
                                 // All borrower names fetched, now create the loan requests list
                                 requestsList.clear()
-                                documents.forEach { doc ->
+                                sortedDocuments.forEach { doc ->
                                     try {
                                         val borrowerUid = doc.getString("borrower_uid") ?: ""
+                                        val tenureDaysFromDoc =
+                                            doc.getLong("tenure_days")?.toInt() ?: 0
+                                        val tenureMonthsFromDoc =
+                                            doc.getLong("tenure_months")?.toInt() ?: 0
+
+                                        // Calculate tenureDays if not present
+                                        val finalTenureDays = if (tenureDaysFromDoc > 0) {
+                                            tenureDaysFromDoc
+                                        } else if (tenureMonthsFromDoc > 0) {
+                                            tenureMonthsFromDoc * 30
+                                        } else {
+                                            0
+                                        }
+
                                         requestsList.add(
                                             LenderLoanRequest(
                                                 id = doc.id,
@@ -97,9 +116,10 @@ fun LenderLoanRequestsScreen(
                                                 borrowerName = borrowerNames[borrowerUid]
                                                     ?: "Unknown User",
                                                 amount = doc.getLong("amount")?.toInt() ?: 0,
-                                                interest = doc.getDouble("interest") ?: 0.0,
-                                                tenureDays = doc.getLong("tenure_days")?.toInt()
-                                                    ?: 0,
+                                                interestRateTotal = doc.getDouble("interest_rate_total")
+                                                    ?: doc.getDouble("interest") ?: 0.0,
+                                                tenureMonths = tenureMonthsFromDoc,
+                                                tenureDays = finalTenureDays,
                                                 status = doc.getString("status") ?: "pending",
                                                 timestamp = doc.getTimestamp("timestamp")
                                             )
@@ -117,9 +137,22 @@ fun LenderLoanRequestsScreen(
                             fetchedCount++
                             if (fetchedCount == borrowerUids.size) {
                                 requestsList.clear()
-                                documents.forEach { doc ->
+                                sortedDocuments.forEach { doc ->
                                     try {
                                         val borrowerUid = doc.getString("borrower_uid") ?: ""
+                                        val tenureDaysFromDoc =
+                                            doc.getLong("tenure_days")?.toInt() ?: 0
+                                        val tenureMonthsFromDoc =
+                                            doc.getLong("tenure_months")?.toInt() ?: 0
+
+                                        val finalTenureDays = if (tenureDaysFromDoc > 0) {
+                                            tenureDaysFromDoc
+                                        } else if (tenureMonthsFromDoc > 0) {
+                                            tenureMonthsFromDoc * 30
+                                        } else {
+                                            0
+                                        }
+
                                         requestsList.add(
                                             LenderLoanRequest(
                                                 id = doc.id,
@@ -127,9 +160,10 @@ fun LenderLoanRequestsScreen(
                                                 borrowerName = borrowerNames[borrowerUid]
                                                     ?: "Unknown User",
                                                 amount = doc.getLong("amount")?.toInt() ?: 0,
-                                                interest = doc.getDouble("interest") ?: 0.0,
-                                                tenureDays = doc.getLong("tenure_days")?.toInt()
-                                                    ?: 0,
+                                                interestRateTotal = doc.getDouble("interest_rate_total")
+                                                    ?: doc.getDouble("interest") ?: 0.0,
+                                                tenureMonths = tenureMonthsFromDoc,
+                                                tenureDays = finalTenureDays,
                                                 status = doc.getString("status") ?: "pending",
                                                 timestamp = doc.getTimestamp("timestamp")
                                             )
@@ -146,6 +180,11 @@ fun LenderLoanRequestsScreen(
             }
             .addOnFailureListener { e ->
                 errorMessage = "Failed to load loan requests: ${e.message}"
+                android.util.Log.e(
+                    "LenderRequests",
+                    "Query failed. You may need to create a composite index in Firestore for lender_uid and timestamp.",
+                    e
+                )
                 isLoading = false
             }
     }
@@ -253,8 +292,8 @@ fun LenderLoanRequestsScreen(
                                                     "borrower_uid" to request.borrowerUid,
                                                     "lender_uid" to currentUser.uid,
                                                     "amount" to request.amount,
-                                                    "interest" to request.interest,
-                                                    "tenure_days" to request.tenureDays,
+                                                    "interest_rate_total" to request.interestRateTotal,
+                                                    "tenure_months" to request.tenureMonths,
                                                     "start_date" to Timestamp.now(),
                                                     "status" to "ongoing"
                                                 )
@@ -414,7 +453,7 @@ fun LenderLoanRequestCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = "${request.interest}%",
+                        text = "${request.interestRateTotal}%",
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontWeight = FontWeight.Bold
                         ),
@@ -435,7 +474,11 @@ fun LenderLoanRequestCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = "${request.tenureDays} days",
+                    text = if (request.tenureMonths > 0) {
+                        "${request.tenureMonths} months (${request.tenureDays} days)"
+                    } else {
+                        "${request.tenureDays} days"
+                    },
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontWeight = FontWeight.Medium
                     ),
