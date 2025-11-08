@@ -1,6 +1,7 @@
 package com.runanywhere.startup_hackathon20
 
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -11,14 +12,20 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.google.firebase.auth.FirebaseAuth
 import com.runanywhere.startup_hackathon20.ui.theme.Startup_hackathon20Theme
+import java.net.URLDecoder
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -32,11 +39,21 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+// Helper functions for safe URL encoding/decoding
+fun String.encodeUrl(): String {
+    return URLEncoder.encode(this, StandardCharsets.UTF_8.toString())
+}
+
+fun String.decodeUrl(): String {
+    return URLDecoder.decode(this, StandardCharsets.UTF_8.toString())
+}
+
 @Composable
 fun AppNavigation() {
     val navController = rememberNavController()
     val auth = FirebaseAuth.getInstance()
     val currentUser = auth.currentUser
+    val context = LocalContext.current
 
     // Determine start destination based on authentication state
     val startDestination = if (currentUser != null) "userDashboard" else "login"
@@ -85,6 +102,9 @@ fun AppNavigation() {
                     navController.navigate("login") {
                         popUpTo(0) { inclusive = true }
                     }
+                },
+                onNavigateToProfile = {
+                    navController.navigate("userProfile")
                 }
             )
         }
@@ -126,8 +146,199 @@ fun AppNavigation() {
                     navController.popBackStack()
                 },
                 onRequestLoan = { offer ->
-                    // TODO: Handle loan request
-                    // For now, just show a simple response or navigate to loan request screen
+                    try {
+                        // Navigate to review offer screen with loan details
+                        // Encode lenderName to handle special characters
+                        val encodedLenderName = offer.lenderName.encodeUrl()
+
+                        // Validate offer data before navigation
+                        // Note: lenderUid can be a placeholder (lender_xxx or unknown_lender)
+                        android.util.Log.d(
+                            "NavigationDebug",
+                            "Navigating with offer - lenderUid: ${offer.lenderUid}, lenderName: ${offer.lenderName}, amount: ${offer.loanAmount}, interest: ${offer.interestRate}, tenure: ${offer.tenureMonths}"
+                        )
+
+                        if (offer.lenderName.isBlank()) {
+                            Toast.makeText(
+                                context,
+                                "Error: Missing lender name",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                            return@BorrowerLoanDashboardScreen
+                        }
+
+                        if (offer.loanAmount <= 0) {
+                            Toast.makeText(
+                                context,
+                                "Error: Invalid loan amount",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                            return@BorrowerLoanDashboardScreen
+                        }
+
+                        if (offer.tenureMonths <= 0) {
+                            Toast.makeText(
+                                context,
+                                "Error: Invalid tenure",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                            return@BorrowerLoanDashboardScreen
+                        }
+
+                        // Convert Double to Float for navigation
+                        val interestFloat = offer.interestRate.toFloat()
+
+                        navController.navigate(
+                            "reviewOffer/${offer.lenderUid}/$encodedLenderName/${offer.loanAmount}/$interestFloat/${offer.tenureMonths}"
+                        )
+                    } catch (e: Exception) {
+                        Toast.makeText(
+                            context,
+                            "Navigation error: ${e.message}",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        android.util.Log.e(
+                            "NavigationError",
+                            "Failed to navigate to reviewOffer",
+                            e
+                        )
+                    }
+                },
+                onNavigateToProfile = {
+                    navController.navigate("userProfile")
+                }
+            )
+        }
+
+        composable(
+            "reviewOffer/{lender_uid}/{lender_name}/{amount}/{interest}/{tenure_months}",
+            arguments = listOf(
+                navArgument("lender_uid") {
+                    type = NavType.StringType
+                    defaultValue = ""
+                },
+                navArgument("lender_name") {
+                    type = NavType.StringType
+                    defaultValue = ""
+                },
+                navArgument("amount") {
+                    type = NavType.IntType
+                    defaultValue = 0
+                },
+                navArgument("interest") {
+                    type = NavType.FloatType
+                    defaultValue = 0.0f
+                },
+                navArgument("tenure_months") {
+                    type = NavType.IntType
+                    defaultValue = 0
+                }
+            )
+        ) { backStackEntry ->
+            var errorState by remember { mutableStateOf<String?>(null) }
+
+            // Safe argument retrieval with validation
+            val lenderUid =
+                backStackEntry.arguments?.getString("lender_uid")?.takeIf { it.isNotBlank() } ?: ""
+            val lenderName = backStackEntry.arguments?.getString("lender_name")?.decodeUrl()
+                ?.takeIf { it.isNotBlank() } ?: ""
+            val amount = backStackEntry.arguments?.getInt("amount") ?: 0
+            val interest = backStackEntry.arguments?.getFloat("interest")?.toDouble() ?: 0.0
+            val tenureMonths = backStackEntry.arguments?.getInt("tenure_months") ?: 0
+
+            android.util.Log.d(
+                "ReviewOfferNav",
+                "Received params - lenderUid: $lenderUid, lenderName: $lenderName, amount: $amount, interest: $interest, tenureMonths: $tenureMonths"
+            )
+
+            // Validate required parameters
+            if (lenderName.isBlank()) {
+                errorState = "Missing lender name"
+            } else if (amount <= 0) {
+                errorState = "Invalid loan amount"
+            } else if (interest < 0) {
+                errorState = "Invalid interest rate"
+            } else if (tenureMonths <= 0) {
+                errorState = "Invalid tenure"
+            }
+
+            if (errorState != null) {
+                android.util.Log.e("ReviewOfferNav", "Validation error: $errorState")
+                LaunchedEffect(Unit) {
+                    Toast.makeText(
+                        context,
+                        "Error: $errorState. Please try again.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    navController.popBackStack()
+                }
+                // Show error screen briefly before navigating back
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = androidx.compose.ui.Alignment.Center
+                ) {
+                    Text(
+                        text = "Invalid parameters: $errorState",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            } else {
+                ReviewOfferScreen(
+                    lenderUid = lenderUid,
+                    lenderName = lenderName,
+                    amount = amount,
+                    interest = interest,
+                    tenureMonths = tenureMonths,
+                    onNavigateBack = {
+                        navController.popBackStack()
+                    },
+                    onSuccess = {
+                        navController.navigate("successRequest") {
+                            popUpTo("borrowerDashboard") { inclusive = false }
+                        }
+                    }
+                )
+            }
+        }
+
+        composable("successRequest") {
+            SuccessRequestScreen(
+                onViewLoanStatus = {
+                    navController.navigate("borrowerProfile")
+                }
+            )
+        }
+
+        composable("borrowerProfile") {
+            LoanStatusScreen(
+                onNavigateBack = {
+                    navController.popBackStack()
+                },
+                onNavigateToProfile = {
+                    navController.navigate("userProfile")
+                }
+            )
+        }
+
+        composable("userProfile") {
+            UserProfileScreen(
+                onNavigateBack = {
+                    navController.popBackStack()
+                },
+                onNavigateToLoanStatus = {
+                    navController.navigate("borrowerProfile")
+                },
+                onNavigateToLenderRequests = {
+                    navController.navigate("lenderRequests")
+                }
+            )
+        }
+
+        composable("lenderRequests") {
+            LenderLoanRequestsScreen(
+                onNavigateBack = {
+                    navController.popBackStack()
                 }
             )
         }

@@ -3,6 +3,7 @@ package com.runanywhere.startup_hackathon20
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -19,7 +20,8 @@ import com.google.firebase.auth.FirebaseAuth
 fun UserDashboardScreen(
     onNavigateToBorrow: () -> Unit,
     onNavigateToLend: () -> Unit,
-    onLogout: () -> Unit
+    onLogout: () -> Unit,
+    onNavigateToProfile: () -> Unit = {}
 ) {
     val auth = FirebaseAuth.getInstance()
 
@@ -28,6 +30,12 @@ fun UserDashboardScreen(
             TopAppBar(
                 title = { Text("Dashboard") },
                 actions = {
+                    IconButton(onClick = onNavigateToProfile) {
+                        Icon(
+                            imageVector = Icons.Default.AccountCircle,
+                            contentDescription = "Profile"
+                        )
+                    }
                     IconButton(onClick = {
                         auth.signOut()
                         onLogout()

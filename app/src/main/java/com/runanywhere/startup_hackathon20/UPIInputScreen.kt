@@ -17,6 +17,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -27,7 +29,11 @@ fun UPIInputScreen(
     var upiId by remember { mutableStateOf("") }
     var isError by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
+
+    val auth = FirebaseAuth.getInstance()
+    val firestore = FirebaseFirestore.getInstance()
 
     Scaffold(
         topBar = {
@@ -90,6 +96,7 @@ fun UPIInputScreen(
                 placeholder = { Text("example@paytm") },
                 singleLine = true,
                 isError = isError,
+                enabled = !isLoading,
                 supportingText = {
                     if (isError) {
                         Text(
@@ -160,8 +167,35 @@ fun UPIInputScreen(
                         }
 
                         else -> {
-                            // Valid UPI ID
-                            onSubmitUPI(upiId)
+                            // Valid UPI ID - Save to Firestore
+                            val currentUser = auth.currentUser
+                            if (currentUser == null) {
+                                isError = true
+                                errorMessage = "User not authenticated"
+                                return@Button
+                            }
+
+                            isLoading = true
+
+                            // Save UPI ID to user profile
+                            val userProfile = hashMapOf(
+                                "upi_id" to upiId,
+                                "user_uid" to currentUser.uid,
+                                "updated_at" to com.google.firebase.Timestamp.now()
+                            )
+
+                            firestore.collection("user_profiles")
+                                .document(currentUser.uid)
+                                .set(userProfile)
+                                .addOnSuccessListener {
+                                    isLoading = false
+                                    onSubmitUPI(upiId)
+                                }
+                                .addOnFailureListener { e ->
+                                    isLoading = false
+                                    isError = true
+                                    errorMessage = "Failed to save UPI ID: ${e.message}"
+                                }
                         }
                     }
                 },
@@ -171,15 +205,23 @@ fun UPIInputScreen(
                 shape = RoundedCornerShape(16.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary
-                )
+                ),
+                enabled = !isLoading
             ) {
-                Text(
-                    text = "Verify UPI",
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 20.sp
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        color = MaterialTheme.colorScheme.onPrimary
                     )
-                )
+                } else {
+                    Text(
+                        text = "Verify UPI",
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 20.sp
+                        )
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -191,6 +233,36 @@ fun UPIInputScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
             )
+
+            // Developer test data seeder (for testing only)
+            Spacer(modifier = Modifier.height(24.dp))
+            TextButton(
+                onClick = {
+                    if (upiId.isBlank() || !upiId.contains("@")) {
+                        isError = true
+                        errorMessage = "Enter a valid UPI ID first"
+                        return@TextButton
+                    }
+
+                    isLoading = true
+                    TestDataSeeder.seedTestTransactions(upiId) { success, message ->
+                        isLoading = false
+                        if (success) {
+                            errorMessage = "✅ Test data seeded successfully! You can now verify."
+                        } else {
+                            isError = true
+                            errorMessage = message
+                        }
+                    }
+                },
+                enabled = !isLoading
+            ) {
+                Text(
+                    text = "🧪 Seed Test Data (Dev Only)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.secondary
+                )
+            }
         }
     }
 }
