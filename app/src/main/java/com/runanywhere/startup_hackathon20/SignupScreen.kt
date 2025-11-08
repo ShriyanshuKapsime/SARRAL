@@ -20,6 +20,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.UserProfileChangeRequest
+import com.google.firebase.firestore.FirebaseFirestore
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -37,6 +38,7 @@ fun SignupScreen(
     var errorMessage by remember { mutableStateOf<String?>(null) }
     
     val auth = FirebaseAuth.getInstance()
+    val firestore = FirebaseFirestore.getInstance()
     val focusManager = LocalFocusManager.current
 
     Scaffold(
@@ -237,24 +239,50 @@ fun SignupScreen(
                                     if (task.isSuccessful) {
                                         // Update user profile with name
                                         val user = auth.currentUser
-                                        val profileUpdates = UserProfileChangeRequest.Builder()
-                                            .setDisplayName(name)
-                                            .build()
-                                        
-                                        user?.updateProfile(profileUpdates)
-                                            ?.addOnCompleteListener { profileTask ->
-                                                isLoading = false
-                                                if (profileTask.isSuccessful) {
-                                                    // Sign out user so they need to login
-                                                    auth.signOut()
-                                                    onSignupSuccess()
-                                                } else {
-                                                    errorMessage =
-                                                        "Profile update failed. Please login to continue."
-                                                    auth.signOut()
-                                                    onSignupSuccess()
+                                        if (user != null) {
+                                            val profileUpdates = UserProfileChangeRequest.Builder()
+                                                .setDisplayName(name)
+                                                .build()
+
+                                            user.updateProfile(profileUpdates)
+                                                .addOnCompleteListener { profileTask ->
+                                                    if (profileTask.isSuccessful) {
+                                                        // Create Firestore profile
+                                                        val userProfile = hashMapOf(
+                                                            "full_name" to name,
+                                                            "email" to email,
+                                                            "upi_id" to "",
+                                                            "role" to "borrower"
+                                                        )
+
+                                                        firestore.collection("user_profiles")
+                                                            .document(user.uid)
+                                                            .set(userProfile)
+                                                            .addOnSuccessListener {
+                                                                isLoading = false
+                                                                // Sign out user so they need to login
+                                                                auth.signOut()
+                                                                onSignupSuccess()
+                                                            }
+                                                            .addOnFailureListener { e ->
+                                                                isLoading = false
+                                                                errorMessage =
+                                                                    "Profile creation failed: ${e.message}"
+                                                                auth.signOut()
+                                                                onSignupSuccess()
+                                                            }
+                                                    } else {
+                                                        isLoading = false
+                                                        errorMessage =
+                                                            "Profile update failed. Please login to continue."
+                                                        auth.signOut()
+                                                        onSignupSuccess()
+                                                    }
                                                 }
-                                            }
+                                        } else {
+                                            isLoading = false
+                                            errorMessage = "User creation failed"
+                                        }
                                     } else {
                                         isLoading = false
                                         val error = task.exception?.message ?: "Signup failed"

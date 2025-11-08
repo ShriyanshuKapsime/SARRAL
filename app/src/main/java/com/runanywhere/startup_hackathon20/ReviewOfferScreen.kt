@@ -31,10 +31,35 @@ fun ReviewOfferScreen(
 ) {
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var userLoanLimit by remember { mutableStateOf<Int?>(null) }
+    var isLoadingLoanLimit by remember { mutableStateOf(true) }
 
     // Validate parameters on screen load
     var hasValidationError by remember { mutableStateOf(false) }
     var validationMessage by remember { mutableStateOf("") }
+
+    val auth = FirebaseAuth.getInstance()
+    val firestore = FirebaseFirestore.getInstance()
+
+    // Fetch user's loan limit on screen load
+    LaunchedEffect(Unit) {
+        val currentUser = auth.currentUser
+        if (currentUser != null) {
+            firestore.collection("user_profiles")
+                .document(currentUser.uid)
+                .get()
+                .addOnSuccessListener { doc ->
+                    userLoanLimit = doc.getLong("loan_limit")?.toInt() ?: 0
+                    isLoadingLoanLimit = false
+                }
+                .addOnFailureListener {
+                    userLoanLimit = 0
+                    isLoadingLoanLimit = false
+                }
+        } else {
+            isLoadingLoanLimit = false
+        }
+    }
 
     LaunchedEffect(Unit) {
         when {
@@ -74,9 +99,6 @@ fun ReviewOfferScreen(
     } else {
         0
     }
-
-    val auth = FirebaseAuth.getInstance()
-    val firestore = FirebaseFirestore.getInstance()
 
     Scaffold(
         topBar = {
@@ -138,172 +160,271 @@ fun ReviewOfferScreen(
                     }
                 }
             }
-        } else {
-            Column(
+        } else if (isLoadingLoanLimit) {
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(padding)
-                    .verticalScroll(rememberScrollState())
-                    .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                    .padding(padding),
+                contentAlignment = Alignment.Center
             ) {
-                // Loan Details Card
                 Card(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(24.dp),
                     colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer
-                    ),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                        containerColor = MaterialTheme.colorScheme.errorContainer
+                    )
                 ) {
                     Column(
-                        modifier = Modifier.padding(20.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                        modifier = Modifier.padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
+                        CircularProgressIndicator()
+                        Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "Loan Details",
-                            style = MaterialTheme.typography.titleLarge.copy(
-                                fontWeight = FontWeight.Bold
-                            ),
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-
-                        HorizontalDivider()
-
-                        DetailRow(label = "Lender", value = lenderName)
-                        DetailRow(label = "Loan Amount", value = "₹${String.format("%,d", amount)}")
-                        DetailRow(label = "Interest Rate", value = "$interest%")
-                        DetailRow(
-                            label = "Tenure",
-                            value = "$tenureMonths months ($tenureDays days)"
+                            text = "Checking loan limit...",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                     }
                 }
-
-                // Calculated Values Card
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer
-                    ),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+            }
+        } else {
+            val loanLimit = userLoanLimit ?: 0
+            if (amount > loanLimit) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Column(
-                        modifier = Modifier.padding(20.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Text(
-                            text = "Repayment Breakdown",
-                            style = MaterialTheme.typography.titleLarge.copy(
-                                fontWeight = FontWeight.Bold
-                            ),
-                            color = MaterialTheme.colorScheme.onSecondaryContainer
-                        )
-
-                        HorizontalDivider()
-
-                        DetailRow(
-                            label = "Total Interest",
-                            value = "₹${String.format("%,d", totalInterest)}",
-                            highlighted = true
-                        )
-                        DetailRow(
-                            label = "Total Amount to Repay",
-                            value = "₹${String.format("%,d", totalRepayable)}",
-                            highlighted = true
-                        )
-                        DetailRow(
-                            label = "Daily EMI via UPI AutoPay",
-                            value = "₹${String.format("%,d", dailyEmi)}",
-                            highlighted = true
-                        )
-                    }
-                }
-
-                // Footer
-                Text(
-                    text = "Powered by RunAnywhere Smart Financial Engine",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
-
-                // Error Message
-                if (errorMessage != null) {
                     Card(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
                         colors = CardDefaults.cardColors(
                             containerColor = MaterialTheme.colorScheme.errorContainer
                         )
                     ) {
-                        Text(
-                            text = errorMessage!!,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.padding(16.dp)
-                        )
+                        Column(
+                            modifier = Modifier.padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            Text(
+                                text = "Cannot Request This Loan",
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                            Text(
+                                text = "You cannot request this loan because it exceeds your available loan limit.",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Requested Amount: ₹${String.format("%,d", amount)}",
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                            Text(
+                                text = "Available Limit: ₹${String.format("%,d", loanLimit)}",
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Button(
+                                onClick = onNavigateBack,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.error
+                                )
+                            ) {
+                                Text("Go Back")
+                            }
+                        }
                     }
                 }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Confirm Button
-                Button(
-                    onClick = {
-                        val currentUser = auth.currentUser
-                        if (currentUser == null) {
-                            errorMessage = "User not authenticated"
-                            return@Button
-                        }
-
-                        isLoading = true
-                        errorMessage = null
-
-                        // Create loan request document
-                        val loanRequest = hashMapOf(
-                            "borrower_uid" to currentUser.uid,
-                            "lender_uid" to lenderUid,
-                            "lender_name" to lenderName,
-                            "amount" to amount,
-                            "interest" to interest,
-                            "tenure_months" to tenureMonths,
-                            "tenure_days" to tenureDays,
-                            "total_repayable" to totalRepayable,
-                            "daily_emi" to dailyEmi,
-                            "status" to "pending",
-                            "timestamp" to com.google.firebase.Timestamp.now()
-                        )
-
-                        firestore.collection("loan_requests")
-                            .add(loanRequest)
-                            .addOnSuccessListener {
-                                isLoading = false
-                                onSuccess()
-                            }
-                            .addOnFailureListener { e ->
-                                isLoading = false
-                                errorMessage = "Failed to submit request: ${e.message}"
-                            }
-                    },
+            } else {
+                Column(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(64.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    enabled = !isLoading
+                        .fillMaxSize()
+                        .padding(padding)
+                        .verticalScroll(rememberScrollState())
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    if (isLoading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(24.dp),
-                            color = MaterialTheme.colorScheme.onPrimary
-                        )
-                    } else {
-                        Text(
-                            text = "Confirm Loan Request",
-                            style = MaterialTheme.typography.titleLarge.copy(
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 20.sp
+                    // Loan Details Card
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer
+                        ),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(20.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Text(
+                                text = "Loan Details",
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
                             )
-                        )
+
+                            HorizontalDivider()
+
+                            DetailRow(label = "Lender", value = lenderName)
+                            DetailRow(
+                                label = "Loan Amount",
+                                value = "₹${String.format("%,d", amount)}"
+                            )
+                            DetailRow(
+                                label = "Interest Rate",
+                                value = "${String.format("%.2f", interest)}%"
+                            )
+                            DetailRow(
+                                label = "Tenure",
+                                value = "$tenureMonths months ($tenureDays days)"
+                            )
+                        }
+                    }
+
+                    // Calculated Values Card
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer
+                        ),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(20.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Text(
+                                text = "Repayment Breakdown",
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+
+                            HorizontalDivider()
+
+                            DetailRow(
+                                label = "Total Interest",
+                                value = "₹${String.format("%,d", totalInterest)}",
+                                highlighted = true
+                            )
+                            DetailRow(
+                                label = "Total Amount to Repay",
+                                value = "₹${String.format("%,d", totalRepayable)}",
+                                highlighted = true
+                            )
+                            DetailRow(
+                                label = "Daily EMI via UPI AutoPay",
+                                value = "₹${String.format("%,d", dailyEmi)}",
+                                highlighted = true
+                            )
+                        }
+                    }
+
+                    // Footer
+                    Text(
+                        text = "Powered by RunAnywhere Smart Financial Engine",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
+
+                    // Error Message
+                    if (errorMessage != null) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer
+                            )
+                        ) {
+                            Text(
+                                text = errorMessage!!,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.padding(16.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Confirm Button
+                    Button(
+                        onClick = {
+                            val currentUser = auth.currentUser
+                            if (currentUser == null) {
+                                errorMessage = "User not authenticated"
+                                return@Button
+                            }
+
+                            isLoading = true
+                            errorMessage = null
+
+                            // Create loan request document
+                            val loanRequest = hashMapOf(
+                                "borrower_uid" to currentUser.uid,
+                                "lender_uid" to lenderUid,
+                                "lender_name" to lenderName,
+                                "amount" to amount,
+                                "interest" to interest,
+                                "tenure_months" to tenureMonths,
+                                "tenure_days" to tenureDays,
+                                "total_repayable" to totalRepayable,
+                                "daily_emi" to dailyEmi,
+                                "status" to "pending",
+                                "timestamp" to com.google.firebase.Timestamp.now()
+                            )
+
+                            firestore.collection("loan_requests")
+                                .add(loanRequest)
+                                .addOnSuccessListener {
+                                    isLoading = false
+                                    onSuccess()
+                                }
+                                .addOnFailureListener { e ->
+                                    isLoading = false
+                                    errorMessage = "Failed to submit request: ${e.message}"
+                                }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(64.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        enabled = !isLoading
+                    ) {
+                        if (isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                        } else {
+                            Text(
+                                text = "Confirm Loan Request",
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 20.sp
+                                )
+                            )
+                        }
                     }
                 }
             }

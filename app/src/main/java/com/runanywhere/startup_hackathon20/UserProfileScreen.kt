@@ -21,6 +21,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.Timestamp
+import java.util.Date
+import java.util.concurrent.TimeUnit
+import kotlin.math.roundToInt
 
 data class UserProfile(
     val name: String = "",
@@ -30,6 +34,16 @@ data class UserProfile(
     val sarralScore: Int = 0,
     val goodwillScore: Int = 0,
     val loanLimit: Int = 0
+)
+
+data class ActiveLoanDetail(
+    val id: String = "",
+    val borrowerName: String = "",
+    val amount: Int = 0,
+    val interestRateTotal: Double = 0.0,
+    val tenureMonths: Int = 0,
+    val startDate: Timestamp? = null,
+    val status: String = "ongoing"
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -45,6 +59,7 @@ fun UserProfileScreen(
     var loanCount by remember { mutableStateOf(0) }
     var lendedLoanCount by remember { mutableStateOf(0) }
     var isSwitchingRole by remember { mutableStateOf(false) }
+    var activeLoansDetails by remember { mutableStateOf<List<ActiveLoanDetail>>(emptyList()) }
 
     val auth = FirebaseAuth.getInstance()
     val firestore = FirebaseFirestore.getInstance()
@@ -91,13 +106,107 @@ fun UserProfileScreen(
                                 isLoading = false
                             }
                     } else {
-                        // Fetch lended loan count for lender (from active_loans)
+                        // Fetch active loans with details for lender
                         firestore.collection("active_loans")
                             .whereEqualTo("lender_uid", currentUser.uid)
+                            .whereEqualTo("status", "ongoing")
                             .get()
                             .addOnSuccessListener { loans ->
                                 lendedLoanCount = loans.size()
-                                isLoading = false
+
+                                // Fetch borrower names for each loan
+                                val borrowerUids = loans.documents.mapNotNull {
+                                    it.getString("borrower_uid")
+                                }.distinct()
+
+                                if (borrowerUids.isNotEmpty()) {
+                                    val borrowerNames = mutableMapOf<String, String>()
+                                    var fetchedCount = 0
+
+                                    borrowerUids.forEach { borrowerUid ->
+                                        firestore.collection("user_profiles")
+                                            .document(borrowerUid)
+                                            .get()
+                                            .addOnSuccessListener { userDoc ->
+                                                borrowerNames[borrowerUid] =
+                                                    userDoc.getString("name")
+                                                        ?: userDoc.getString("email")
+                                                            ?.substringBefore("@")
+                                                                ?: "Unknown User"
+
+                                                fetchedCount++
+                                                if (fetchedCount == borrowerUids.size) {
+                                                    // All names fetched, create loan details list
+                                                    val loansList =
+                                                        loans.documents.mapNotNull { doc ->
+                                                            try {
+                                                                val borrowerUid =
+                                                                    doc.getString("borrower_uid")
+                                                                        ?: ""
+                                                                ActiveLoanDetail(
+                                                                    id = doc.id,
+                                                                    borrowerName = borrowerNames[borrowerUid]
+                                                                        ?: "Unknown User",
+                                                                    amount = doc.getLong("amount")
+                                                                        ?.toInt() ?: 0,
+                                                                    interestRateTotal = doc.getDouble(
+                                                                        "interest_rate_total"
+                                                                    )
+                                                                        ?: doc.getDouble("interest")
+                                                                        ?: 0.0,
+                                                                    tenureMonths = doc.getLong("tenure_months")
+                                                                        ?.toInt() ?: 0,
+                                                                    startDate = doc.getTimestamp("start_date"),
+                                                                    status = doc.getString("status")
+                                                                        ?: "ongoing"
+                                                                )
+                                                            } catch (e: Exception) {
+                                                                null
+                                                            }
+                                                        }
+                                                    activeLoansDetails = loansList
+                                                    isLoading = false
+                                                }
+                                            }
+                                            .addOnFailureListener {
+                                                borrowerNames[borrowerUid] = "Unknown User"
+                                                fetchedCount++
+                                                if (fetchedCount == borrowerUids.size) {
+                                                    val loansList =
+                                                        loans.documents.mapNotNull { doc ->
+                                                            try {
+                                                                val borrowerUid =
+                                                                    doc.getString("borrower_uid")
+                                                                        ?: ""
+                                                                ActiveLoanDetail(
+                                                                    id = doc.id,
+                                                                    borrowerName = borrowerNames[borrowerUid]
+                                                                        ?: "Unknown User",
+                                                                    amount = doc.getLong("amount")
+                                                                        ?.toInt() ?: 0,
+                                                                    interestRateTotal = doc.getDouble(
+                                                                        "interest_rate_total"
+                                                                    )
+                                                                        ?: doc.getDouble("interest")
+                                                                        ?: 0.0,
+                                                                    tenureMonths = doc.getLong("tenure_months")
+                                                                        ?.toInt() ?: 0,
+                                                                    startDate = doc.getTimestamp("start_date"),
+                                                                    status = doc.getString("status")
+                                                                        ?: "ongoing"
+                                                                )
+                                                            } catch (e: Exception) {
+                                                                null
+                                                            }
+                                                        }
+                                                    activeLoansDetails = loansList
+                                                    isLoading = false
+                                                }
+                                            }
+                                    }
+                                } else {
+                                    isLoading = false
+                                }
                             }
                             .addOnFailureListener {
                                 isLoading = false
@@ -404,6 +513,36 @@ fun UserProfileScreen(
                             }
                         }
                     }
+
+                    // Loans Currently Lended Section
+                    if (activeLoansDetails.isNotEmpty()) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                            )
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(20.dp),
+                                verticalArrangement = Arrangement.spacedBy(16.dp)
+                            ) {
+                                Text(
+                                    text = "Loans Currently Lended",
+                                    style = MaterialTheme.typography.titleLarge.copy(
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                                )
+
+                                activeLoansDetails.forEach { loan ->
+                                    ActiveLoanDetailCard(loan = loan)
+                                }
+                            }
+                        }
+                    }
                 }
 
                 // Switch Role Button
@@ -532,6 +671,211 @@ fun UserProfileScreen(
                                 )
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ActiveLoanDetailCard(loan: ActiveLoanDetail) {
+    // Calculate loan details
+    val totalInterest = (loan.amount * (loan.interestRateTotal / 100)).roundToInt()
+    val totalRepayable = loan.amount + totalInterest
+    val dailyEmi = if (loan.tenureMonths > 0) {
+        (totalRepayable.toDouble() / (loan.tenureMonths * 30)).roundToInt()
+    } else {
+        0
+    }
+
+    // Calculate days passed since start date
+    val daysPassed = if (loan.startDate != null) {
+        val startDateMillis = loan.startDate.toDate().time
+        val currentDateMillis = Date().time
+        val diffInMillis = currentDateMillis - startDateMillis
+        TimeUnit.MILLISECONDS.toDays(diffInMillis).toInt()
+    } else {
+        0
+    }
+
+    // Calculate remaining amount
+    val amountPaid = (dailyEmi * daysPassed)
+    val remainingAmount = (totalRepayable - amountPaid).coerceAtLeast(0)
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Borrower Name Header
+            Text(
+                text = loan.borrowerName,
+                style = MaterialTheme.typography.titleLarge.copy(
+                    fontWeight = FontWeight.Bold
+                ),
+                color = MaterialTheme.colorScheme.primary
+            )
+
+            HorizontalDivider()
+
+            // Loan Amount
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "Loan Amount",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "₹${String.format("%,d", loan.amount)}",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontWeight = FontWeight.SemiBold
+                    )
+                )
+            }
+
+            // Interest Rate
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "Interest Rate",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "${String.format("%.2f", loan.interestRateTotal)}%",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontWeight = FontWeight.SemiBold
+                    )
+                )
+            }
+
+            // Tenure
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "Tenure",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "${loan.tenureMonths} months",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontWeight = FontWeight.SemiBold
+                    )
+                )
+            }
+
+            // Days Passed
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "Days Passed",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "$daysPassed days",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontWeight = FontWeight.SemiBold
+                    )
+                )
+            }
+
+            HorizontalDivider()
+
+            // Key Financial Metrics
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                )
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Remaining EMI
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Remaining EMI:",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold
+                            ),
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        Text(
+                            text = "₹${String.format("%,d", remainingAmount)}",
+                            style = MaterialTheme.typography.titleLarge.copy(
+                                fontWeight = FontWeight.Bold
+                            ),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    // Daily EMI
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Daily EMI:",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        Text(
+                            text = "₹${String.format("%,d", dailyEmi)}",
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                fontWeight = FontWeight.Bold
+                            ),
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                    }
+
+                    // Amount To Receive Total
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Amount To Receive Total:",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        Text(
+                            text = "₹${String.format("%,d", totalRepayable)}",
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                fontWeight = FontWeight.Bold
+                            ),
+                            color = MaterialTheme.colorScheme.tertiary
+                        )
                     }
                 }
             }
