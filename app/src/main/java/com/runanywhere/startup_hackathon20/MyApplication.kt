@@ -2,6 +2,7 @@ package com.runanywhere.startup_hackathon20
 
 import android.app.Application
 import android.util.Log
+import com.google.firebase.FirebaseApp
 import com.runanywhere.sdk.public.RunAnywhere
 import com.runanywhere.sdk.data.models.SDKEnvironment
 import com.runanywhere.sdk.public.extensions.addModelFromURL
@@ -14,6 +15,14 @@ class MyApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+
+        // Initialize Firebase
+        try {
+            FirebaseApp.initializeApp(this)
+            Log.i("MyApp", "FirebaseApp initialization successful")
+        } catch (e: Exception) {
+            Log.e("MyApp", "FirebaseApp initialization failed: ${e.message}")
+        }
 
         // Initialize SDK asynchronously
         GlobalScope.launch(Dispatchers.IO) {

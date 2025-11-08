@@ -405,8 +405,8 @@ fun BorrowerLoanDashboardScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding),
-                contentPadding = PaddingValues(24.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 // SARRAL Score Section
                 item {
@@ -489,9 +489,14 @@ fun BorrowerLoanDashboardScreen(
                     // Empty state
                     item {
                         Card(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
+                            shape = RoundedCornerShape(14.dp),
                             colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant
+                                containerColor = androidx.compose.ui.graphics.Color(0xFF151718)
+                                    .copy(alpha = 0.95f)
                             )
                         ) {
                             Box(
@@ -503,7 +508,7 @@ fun BorrowerLoanDashboardScreen(
                                 Text(
                                     text = "No offers available at the moment. Please check back later.",
                                     style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    color = androidx.compose.ui.graphics.Color(0xFFB0B0B0),
                                     textAlign = TextAlign.Center
                                 )
                             }
@@ -529,16 +534,23 @@ fun LoanOfferCard(
     onRequestLoan: () -> Unit
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = 3.dp,
+            pressedElevation = 1.dp,
+            focusedElevation = 4.dp
+        ),
+        shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
+            containerColor = androidx.compose.ui.graphics.Color(0xFF151718).copy(alpha = 0.95f)
         )
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp)
+                .padding(18.dp)
         ) {
             // Lender Name
             Text(
@@ -546,10 +558,10 @@ fun LoanOfferCard(
                 style = MaterialTheme.typography.titleLarge.copy(
                     fontWeight = FontWeight.SemiBold
                 ),
-                color = MaterialTheme.colorScheme.onSurface
+                color = androidx.compose.ui.graphics.Color.White
             )
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Loan Details
             Row(
@@ -561,14 +573,15 @@ fun LoanOfferCard(
                     Text(
                         text = "Loan Amount",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = androidx.compose.ui.graphics.Color(0xFFB0B0B0)
                     )
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = "₹${String.format("%,d", offer.loanAmount)}",
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontWeight = FontWeight.SemiBold
                         ),
-                        color = MaterialTheme.colorScheme.primary
+                        color = androidx.compose.ui.graphics.Color.White
                     )
                 }
 
@@ -577,19 +590,20 @@ fun LoanOfferCard(
                     Text(
                         text = "Interest Rate",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = androidx.compose.ui.graphics.Color(0xFFB0B0B0)
                     )
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = "${offer.interestRate}%",
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontWeight = FontWeight.SemiBold
                         ),
-                        color = MaterialTheme.colorScheme.secondary
+                        color = androidx.compose.ui.graphics.Color.White
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Tenure
             Row(
@@ -600,24 +614,31 @@ fun LoanOfferCard(
                 Text(
                     text = "Tenure",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = androidx.compose.ui.graphics.Color(0xFFB0B0B0)
                 )
                 Text(
                     text = "${offer.tenureMonths} months",
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontWeight = FontWeight.Medium
                     ),
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = androidx.compose.ui.graphics.Color.White
                 )
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(18.dp))
 
-            // Request Loan Button
+            // Request Loan Button with shadow effect
             Button(
                 onClick = onRequestLoan,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
                 shape = RoundedCornerShape(12.dp),
+                elevation = ButtonDefaults.buttonElevation(
+                    defaultElevation = 4.dp,
+                    pressedElevation = 2.dp,
+                    hoveredElevation = 6.dp
+                ),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary
                 )

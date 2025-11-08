@@ -29,7 +29,8 @@ data class UserProfile(
     val role: String = "borrower",
     val sarralScore: Int = 0,
     val goodwillScore: Int = 0,
-    val loanLimit: Int = 0
+    val loanLimit: Int = 0,
+    val activeLoan: Boolean = false
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -45,6 +46,7 @@ fun UserProfileScreen(
     var loanCount by remember { mutableStateOf(0) }
     var lendedLoanCount by remember { mutableStateOf(0) }
     var isSwitchingRole by remember { mutableStateOf(false) }
+    var showActiveLoanDialog by remember { mutableStateOf(false) }
 
     val auth = FirebaseAuth.getInstance()
     val firestore = FirebaseFirestore.getInstance()
@@ -72,7 +74,8 @@ fun UserProfileScreen(
                         role = doc.getString("role") ?: "borrower",
                         sarralScore = doc.getLong("sarral_score")?.toInt() ?: 0,
                         goodwillScore = doc.getLong("goodwill_score")?.toInt() ?: 0,
-                        loanLimit = doc.getLong("loan_limit")?.toInt() ?: 0
+                        loanLimit = doc.getLong("loan_limit")?.toInt() ?: 0,
+                        activeLoan = doc.getBoolean("active_loan") ?: false
                     )
 
                     val currentRole = doc.getString("role") ?: "borrower"
@@ -244,6 +247,24 @@ fun UserProfileScreen(
                                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                             )
                         }
+
+                        // Active Loan Badge
+                        if (userProfile?.activeLoan == true) {
+                            Surface(
+                                shape = MaterialTheme.shapes.small,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.padding(top = 8.dp)
+                            ) {
+                                Text(
+                                    text = "ACTIVE LOAN",
+                                    style = MaterialTheme.typography.labelLarge.copy(
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    color = MaterialTheme.colorScheme.onError,
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -258,7 +279,7 @@ fun UserProfileScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(20.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
                             Text(
                                 text = "Credit Information",
@@ -436,83 +457,113 @@ fun UserProfileScreen(
                             color = MaterialTheme.colorScheme.onTertiaryContainer
                         )
 
+                        // Active Loan Status Display
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Active Loan:",
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontWeight = FontWeight.Medium
+                                ),
+                                color = MaterialTheme.colorScheme.onTertiaryContainer
+                            )
+                            Text(
+                                text = if (userProfile?.activeLoan == true) "Yes" else "No",
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = if (userProfile?.activeLoan == true)
+                                    MaterialTheme.colorScheme.error
+                                else
+                                    MaterialTheme.colorScheme.primary
+                            )
+                        }
+
                         Button(
                             onClick = {
                                 val currentUser = auth.currentUser ?: return@Button
                                 isSwitchingRole = true
 
-                                // Check for active loans where user is borrower or lender
-                                firestore.collection("active_loans")
-                                    .whereEqualTo("borrower_uid", currentUser.uid)
-                                    .whereEqualTo("status", "ongoing")
-                                    .get()
-                                    .addOnSuccessListener { borrowerLoans ->
-                                        if (borrowerLoans.isEmpty) {
-                                            firestore.collection("active_loans")
-                                                .whereEqualTo("lender_uid", currentUser.uid)
-                                                .whereEqualTo("status", "ongoing")
-                                                .get()
-                                                .addOnSuccessListener { lenderLoans ->
-                                                    if (lenderLoans.isEmpty) {
-                                                        // No active loans, proceed with role switch
-                                                        val newRole =
-                                                            if (userProfile?.role == "borrower") "lender" else "borrower"
+                                if (userProfile?.activeLoan == true) {
+                                    showActiveLoanDialog = true
+                                    isSwitchingRole = false
+                                } else {
+                                    // Check for active loans where user is borrower or lender
+                                    firestore.collection("active_loans")
+                                        .whereEqualTo("borrower_uid", currentUser.uid)
+                                        .whereEqualTo("status", "ongoing")
+                                        .get()
+                                        .addOnSuccessListener { borrowerLoans ->
+                                            if (borrowerLoans.isEmpty) {
+                                                firestore.collection("active_loans")
+                                                    .whereEqualTo("lender_uid", currentUser.uid)
+                                                    .whereEqualTo("status", "ongoing")
+                                                    .get()
+                                                    .addOnSuccessListener { lenderLoans ->
+                                                        if (lenderLoans.isEmpty) {
+                                                            // No active loans, proceed with role switch
+                                                            val newRole =
+                                                                if (userProfile?.role == "borrower") "lender" else "borrower"
 
-                                                        firestore.collection("user_profiles")
-                                                            .document(currentUser.uid)
-                                                            .update("role", newRole)
-                                                            .addOnSuccessListener {
-                                                                userProfile =
-                                                                    userProfile?.copy(role = newRole)
-                                                                isSwitchingRole = false
-                                                                Toast.makeText(
-                                                                    context,
-                                                                    "Role switched to $newRole",
-                                                                    Toast.LENGTH_SHORT
-                                                                ).show()
-                                                            }
-                                                            .addOnFailureListener {
-                                                                isSwitchingRole = false
-                                                                Toast.makeText(
-                                                                    context,
-                                                                    "Failed to switch role",
-                                                                    Toast.LENGTH_SHORT
-                                                                ).show()
-                                                            }
-                                                    } else {
+                                                            firestore.collection("user_profiles")
+                                                                .document(currentUser.uid)
+                                                                .update("role", newRole)
+                                                                .addOnSuccessListener {
+                                                                    userProfile =
+                                                                        userProfile?.copy(role = newRole)
+                                                                    isSwitchingRole = false
+                                                                    Toast.makeText(
+                                                                        context,
+                                                                        "Role switched to $newRole",
+                                                                        Toast.LENGTH_SHORT
+                                                                    ).show()
+                                                                }
+                                                                .addOnFailureListener {
+                                                                    isSwitchingRole = false
+                                                                    Toast.makeText(
+                                                                        context,
+                                                                        "Failed to switch role",
+                                                                        Toast.LENGTH_SHORT
+                                                                    ).show()
+                                                                }
+                                                        } else {
+                                                            isSwitchingRole = false
+                                                            Toast.makeText(
+                                                                context,
+                                                                "Cannot switch roles while a loan is active",
+                                                                Toast.LENGTH_LONG
+                                                            ).show()
+                                                        }
+                                                    }
+                                                    .addOnFailureListener {
                                                         isSwitchingRole = false
                                                         Toast.makeText(
                                                             context,
-                                                            "Cannot switch roles while a loan is active",
-                                                            Toast.LENGTH_LONG
+                                                            "Error checking lender loans",
+                                                            Toast.LENGTH_SHORT
                                                         ).show()
                                                     }
-                                                }
-                                                .addOnFailureListener {
-                                                    isSwitchingRole = false
-                                                    Toast.makeText(
-                                                        context,
-                                                        "Error checking lender loans",
-                                                        Toast.LENGTH_SHORT
-                                                    ).show()
-                                                }
-                                        } else {
+                                            } else {
+                                                isSwitchingRole = false
+                                                Toast.makeText(
+                                                    context,
+                                                    "Cannot switch roles while a loan is active",
+                                                    Toast.LENGTH_LONG
+                                                ).show()
+                                            }
+                                        }
+                                        .addOnFailureListener {
                                             isSwitchingRole = false
                                             Toast.makeText(
                                                 context,
-                                                "Cannot switch roles while a loan is active",
-                                                Toast.LENGTH_LONG
+                                                "Error checking borrower loans",
+                                                Toast.LENGTH_SHORT
                                             ).show()
                                         }
-                                    }
-                                    .addOnFailureListener {
-                                        isSwitchingRole = false
-                                        Toast.makeText(
-                                            context,
-                                            "Error checking borrower loans",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                    }
+                                }
                             },
                             modifier = Modifier.fillMaxWidth(),
                             enabled = !isSwitchingRole
@@ -535,6 +586,30 @@ fun UserProfileScreen(
                     }
                 }
             }
+        }
+        if (showActiveLoanDialog) {
+            AlertDialog(
+                onDismissRequest = { showActiveLoanDialog = false },
+                title = {
+                    Text(
+                        "Role Switch Disabled",
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontWeight = FontWeight.Bold
+                        )
+                    )
+                },
+                text = {
+                    Text(
+                        "You currently have an active loan. You can switch roles only after completing or closing your existing loan.",
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                },
+                confirmButton = {
+                    Button(onClick = { showActiveLoanDialog = false }) {
+                        Text("OK")
+                    }
+                }
+            )
         }
     }
 }
